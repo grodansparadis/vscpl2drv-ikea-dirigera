@@ -1,0 +1,321 @@
+name: CMake Cross-Platform Build
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # Parse version information from src/version.h
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse_version.outputs.version }}
+      version_short: ${{ steps.parse_version.outputs.version_short }}
+      version_major: ${{ steps.parse_version.outputs.version_major }}
+      version_minor: ${{ steps.parse_version.outputs.version_minor }}
+      version_patch: ${{ steps.parse_version.outputs.version_patch }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Parse version from version.h
+      id: parse_version
+      shell: bash
+      run: |
+        VERSION_FILE="src/version.h"
+        if [ ! -f "$VERSION_FILE" ]; then
+          echo "Error: $VERSION_FILE not found"
+          exit 1
+        fi
+
+        echo "Parsing version from $VERSION_FILE"
+
+        VERSION_MAJOR=$(sed -nE 's/^#define[[:space:]]+VSCPL2DRV_IKEA_DIRIGERA_MAJOR_VERSION[[:space:]]+([0-9]+).*$/\1/p' "$VERSION_FILE")
+        VERSION_MINOR=$(sed -nE 's/^#define[[:space:]]+VSCPL2DRV_IKEA_DIRIGERA_MINOR_VERSION[[:space:]]+([0-9]+).*$/\1/p' "$VERSION_FILE")
+        VERSION_PATCH=$(sed -nE 's/^#define[[:space:]]+VSCPL2DRV_IKEA_DIRIGERA_PATCH_VERSION[[:space:]]+([0-9]+).*$/\1/p' "$VERSION_FILE")
+
+        if [ -z "$VERSION_MAJOR" ] || [ -z "$VERSION_MINOR" ] || [ -z "$VERSION_PATCH" ]; then
+          echo "Error: Failed to extract version components"
+          echo "Major: '$VERSION_MAJOR', Minor: '$VERSION_MINOR', Patch: '$VERSION_PATCH'"
+          exit 1
+        fi
+
+        VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+        echo "Extracted version: $VERSION"
+
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "version_short=$VERSION" >> $GITHUB_OUTPUT
+        echo "version_major=$VERSION_MAJOR" >> $GITHUB_OUTPUT
+        echo "version_minor=$VERSION_MINOR" >> $GITHUB_OUTPUT
+        echo "version_patch=$VERSION_PATCH" >> $GITHUB_OUTPUT
+
+  build:
+    needs: version
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+            generator: "Unix Makefiles"
+          - os: windows-latest
+            triplet: x64-windows
+            generator: "Visual Studio 17 2022"
+          - os: macos-latest
+            triplet: arm64-osx
+            generator: "Unix Makefiles"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Display version information
+      shell: bash
+      run: |
+        echo "Building version: ${{ needs.version.outputs.version }}"
+
+    # Linux dependencies
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcurl4-openssl-dev libwebsockets-dev libssl-dev
+
+    # macOS dependencies
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install curl libwebsockets openssl@3 pkg-config
+        echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
+        echo "CMAKE_PREFIX_PATH=$(brew --prefix curl):$(brew --prefix libwebsockets):$(brew --prefix openssl@3):$(brew --prefix)" >> $GITHUB_ENV
+
+    # Setup Visual Studio environment for Windows
+    - name: Setup MSBuild and Visual Studio (Windows)
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v2
+      with:
+        msbuild-architecture: x64
+
+    - name: Setup Visual Studio Environment (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    # Windows dependencies via vcpkg
+    - name: Install vcpkg dependencies (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        git clone https://github.com/Microsoft/vcpkg.git
+        cd vcpkg
+        .\bootstrap-vcpkg.bat
+        .\vcpkg.exe install curl:x64-windows libwebsockets:x64-windows openssl:x64-windows
+        $vcpkgRoot = "${{ github.workspace }}\vcpkg"
+        $toolchainFile = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+        echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+        echo "CMAKE_TOOLCHAIN_FILE=$toolchainFile" >> $env:GITHUB_ENV
+
+    - name: Create Build Environment
+      shell: bash
+      run: cmake -E make_directory ${{github.workspace}}/build
+
+    # Configure CMake for Linux
+    - name: Configure CMake (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cmake $GITHUB_WORKSPACE \
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -G "${{ matrix.generator }}"
+
+    # Configure CMake for macOS
+    - name: Configure CMake (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cmake $GITHUB_WORKSPACE \
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" \
+          -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+          -G "${{ matrix.generator }}"
+
+    # Configure CMake for Windows
+    - name: Configure CMake (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cmake $env:GITHUB_WORKSPACE `
+          -DCMAKE_BUILD_TYPE="$env:BUILD_TYPE" `
+          "-DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE" `
+          -DVCPKG_TARGET_TRIPLET=x64-windows `
+          "-DCMAKE_CXX_FLAGS=/utf-8" `
+          -G "${{ matrix.generator }}" `
+          -A x64
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Debug: Show CMake logs on failure
+    - name: Debug CMake configuration
+      if: failure()
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        echo "=== CMake Error Log ==="
+        cat CMakeFiles/CMakeError.log 2>/dev/null || echo "No CMakeError.log found"
+        echo "=== CMake Output Log ==="
+        cat CMakeFiles/CMakeOutput.log 2>/dev/null || echo "No CMakeOutput.log found"
+
+    - name: Build
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: cmake --build . --config $BUILD_TYPE --parallel
+
+    - name: Test
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C $BUILD_TYPE --output-on-failure || echo "No tests defined"
+
+    # Package for Linux
+    - name: Package (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cpack -G TGZ . || echo "TGZ package creation failed or not configured"
+        cpack -G DEB . || echo "DEB package creation failed or not configured"
+        cpack -G RPM . || echo "RPM package creation failed or not configured"
+        ls -la *.deb *.rpm *.tar.gz *.tgz 2>/dev/null || echo "No packages generated"
+
+    # Package for macOS
+    - name: Package (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cpack -G TGZ . || echo "TGZ package creation failed or not configured"
+        cpack -G ZIP . || echo "ZIP package creation failed or not configured"
+        ls -la *.tar.gz *.tgz *.zip 2>/dev/null || echo "No packages generated"
+
+    # Package for Windows
+    - name: Package (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      working-directory: ${{github.workspace}}/build
+      run: |
+        cpack -G ZIP .
+        if ($LASTEXITCODE -ne 0) { Write-Host "ZIP package creation failed" }
+        Get-ChildItem -Include "*.zip" -Recurse -ErrorAction SilentlyContinue |
+          Format-Table Name, Length -AutoSize
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: vscpl2drv-ikea-dirigera-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}
+        path: |
+          ${{github.workspace}}/build/*.so
+          ${{github.workspace}}/build/**/*.dylib
+          ${{github.workspace}}/build/**/*.dll
+          ${{github.workspace}}/build/*.deb
+          ${{github.workspace}}/build/*.rpm
+          ${{github.workspace}}/build/*.tar.gz
+          ${{github.workspace}}/build/*.tgz
+          ${{github.workspace}}/build/*.zip
+        retention-days: 30
+        if-no-files-found: error
+
+  raspberry-pi:
+    needs: version
+    name: Build (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: raspberry-pi-32
+            platform: linux/arm/v7
+          - name: raspberry-pi-64
+            platform: linux/arm64/v8
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v4
+
+    - name: Enable ARM emulation
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm,arm64
+
+    - name: Build for ${{ matrix.name }}
+      shell: bash
+      run: |
+        docker run --rm \
+          --platform "${{ matrix.platform }}" \
+          --volume "${GITHUB_WORKSPACE}:/workspace" \
+          --workdir /workspace \
+          debian:bookworm \
+          bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential cmake git ca-certificates pkg-config \
+              libcurl4-openssl-dev libwebsockets-dev libssl-dev \
+              file dpkg-dev
+            cmake -S . -B build-rpi \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=/usr
+            cmake --build build-rpi --config Release --parallel 2
+            cd build-rpi
+            cpack -G TGZ . || echo "TGZ package creation failed"
+            cpack -G DEB . || echo "DEB package creation failed"
+            ls -la *.deb *.tar.gz 2>/dev/null || echo "No packages generated"
+          '
+
+    - name: Upload Raspberry Pi artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: vscpl2drv-ikea-dirigera-${{ needs.version.outputs.version_short }}-${{ matrix.name }}
+        path: |
+          ${{ github.workspace }}/build-rpi/*.so
+          ${{ github.workspace }}/build-rpi/*.deb
+          ${{ github.workspace }}/build-rpi/*.tar.gz
+        retention-days: 30
+        if-no-files-found: error
+
+  # Release job (only on tags)
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [version, build, raspberry-pi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/**/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

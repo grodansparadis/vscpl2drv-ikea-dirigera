@@ -1,0 +1,31 @@
+{
+    "hub": "192.168.1.100",
+    "port": 8443,
+    "token": "<access token obtained from the hub>",
+    "verify-tls": false,
+    "use-websocket": false,
+    "poll-interval": 5,
+    "zone": 0,
+    "logging": {
+        "console-enable": true,
+        "console-level": "info",
+        "file-enable": false,
+        "file-path": "/var/log/vscp/vscpl2drv-ikea-dirigera.log",
+        "file-level": "info",
+        "file-max-size": 5242880,
+        "file-max-files": 7
+    },
+    "devices": [
+        {
+            "name": "Desk lamp",
+            "guid": "00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:01",
+            "zone": 1,
+            "subzone": 2,
+            "type": "light"
+        },
+        {
+            "id": "dirigera-device-id",
+            "subzone": 3
+        }
+    ]
+}

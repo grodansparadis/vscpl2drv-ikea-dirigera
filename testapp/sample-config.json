@@ -1,0 +1,21 @@
+{
+    "hub": "192.168.1.200",
+    "port": 8443,
+    "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImMzYzM4NTMyMDk4ZTkyOGQzZGQ0ZGRjOGNlMDliNDQ3Y2ZkYTlmNzdiYTcyNDE5MDNiYmJjMGUzNmZiZWY2N2MifQ.eyJpc3MiOiIyOTdjNjJkZi1hZTdlLTQzZTEtYmQzNy1lYjkzOTgyMTYzMmUiLCJ0eXBlIjoiYWNjZXNzIiwiYXVkIjoiaG9tZXNtYXJ0LmxvY2FsIiwic3ViIjoiZmY3MGI3MmQtNDA2Yi00YTM3LWFlMGQtNjk3MGY0YTZkNmU4IiwiaWF0IjoxNzk0MjM3ODcyLCJleHAiOjIxMDk4MTM4NzJ9.MbCoE6MTsueuTbqQbYK49A0eijqNYw-bfdR6RHdbWQxKPGmk3s-ixHxX3-N2oPYzCFz1fZ4IZ7iG08zDDRrEzg",
+    "verify-tls": false,
+    "use-websocket": true,
+    "poll-interval": 5,
+    "zone": 0,
+    "logging": {
+        "console-enable": true,
+        "console-level": "info",
+        "file-enable": false,
+        "file-path": "/var/log/vscp/vscpl2drv-ikea-dirigera.log",
+        "file-level": "info",
+        "file-max-size": 5242880,
+        "file-max-files": 7
+    },
+    "devices": [
+        { "id": "dirigera-device-id", "subzone": 1 }
+    ]
+}

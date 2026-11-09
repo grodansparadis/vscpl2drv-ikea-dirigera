@@ -1,3 +1,16 @@
+// vscpl2drv-ikea-dirigera.cpp
+//
+// Exported VSCP level II driver interface for the IKEA Dirigera driver.
+//
+// This file is part of the VSCP (https://www.vscp.org)
+//
+// The MIT License (MIT)
+//
+// Copyright (C) 2000-2026 Ake Hedman and contributors,
+// the VSCP project <info@vscp.org>
+
+#include "dirigera.h"
+
 #include <canal.h>
 #include <vscp.h>
 
@@ -14,17 +27,16 @@
 
 namespace {
 
-struct Driver {
-};
-
 std::mutex g_driver_mutex;
-std::map<long, std::unique_ptr<Driver>> g_drivers;
+std::map<long, std::unique_ptr<CIkeaDirigera>> g_drivers;
 long g_next_handle = 1;
 
-bool has_driver(long handle)
+CIkeaDirigera *
+get_driver(long handle)
 {
     std::lock_guard<std::mutex> lock(g_driver_mutex);
-    return g_drivers.find(handle) != g_drivers.end();
+    auto it = g_drivers.find(handle);
+    return (it != g_drivers.end()) ? it->second.get() : nullptr;
 }
 
 } // namespace
@@ -34,11 +46,16 @@ extern "C" {
 VSCP_DRIVER_EXPORT long
 VSCPOpen(const char *config_path, const char *guid)
 {
-    (void)config_path;
-    (void)guid;
+    if (nullptr == config_path) {
+        return 0;
+    }
 
     try {
-        auto driver = std::make_unique<Driver>();
+        auto driver = std::make_unique<CIkeaDirigera>();
+        if (!driver->open(config_path, guid)) {
+            return 0;
+        }
+
         std::lock_guard<std::mutex> lock(g_driver_mutex);
         long handle = g_next_handle;
         while (g_drivers.find(handle) != g_drivers.end()) {
@@ -68,26 +85,27 @@ VSCPWrite(long handle, const vscpEvent *event, unsigned long timeout)
         return CANAL_ERROR_PARAMETER;
     }
 
-    if (!has_driver(handle)) {
+    CIkeaDirigera *driver = get_driver(handle);
+    if (nullptr == driver) {
         return CANAL_ERROR_CHANNEL;
     }
 
-    return CANAL_ERROR_NOT_SUPPORTED;
+    return driver->writeEvent(event);
 }
 
 VSCP_DRIVER_EXPORT int
 VSCPRead(long handle, vscpEvent *event, unsigned long timeout)
 {
-    (void)timeout;
     if (nullptr == event) {
         return CANAL_ERROR_PARAMETER;
     }
 
-    if (!has_driver(handle)) {
+    CIkeaDirigera *driver = get_driver(handle);
+    if (nullptr == driver) {
         return CANAL_ERROR_CHANNEL;
     }
 
-    return CANAL_ERROR_TIMEOUT;
+    return driver->readEvent(event, timeout);
 }
 
 VSCP_DRIVER_EXPORT unsigned long
