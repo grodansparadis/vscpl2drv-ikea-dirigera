@@ -394,12 +394,14 @@ randomCodeVerifier()
 }
 
 // Simple HTTPS request towards the hub (TLS verification off - the hub uses
-// a self signed certificate). Returns true and the response body on success.
+// a self signed certificate). An Authorization header is sent when token is
+// non-empty. Returns true and the response body on success.
 static bool
 hubRequest(const std::string &method,
            const std::string &url,
            const std::string &body,
            const char *contentType,
+           const std::string &token,
            std::string &response,
            std::string &err)
 {
@@ -416,6 +418,10 @@ hubRequest(const std::string &method,
     headers = curl_slist_append(
       headers,
       (std::string("Content-Type: ") + contentType).c_str());
+  }
+  if (!token.empty()) {
+    headers =
+      curl_slist_append(headers, ("Authorization: Bearer " + token).c_str());
   }
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -484,6 +490,7 @@ getTokenFlow(const std::string &host, int port)
                          "&code_challenge_method=S256",
                   "",
                   nullptr,
+                  "",
                   response,
                   err)) {
     fprintf(stderr, "Authorization request failed: %s\n", err.c_str());
@@ -524,6 +531,7 @@ getTokenFlow(const std::string &host, int port)
                   base + "/oauth/token",
                   body,
                   "application/x-www-form-urlencoded",
+                  "",
                   response,
                   err)) {
     fprintf(stderr,
@@ -554,6 +562,41 @@ getTokenFlow(const std::string &host, int port)
   return 0;
 }
 
+// Fetch the complete home state (devices, rooms, scenes, users, hub info)
+// from the hub and print it as pretty formatted JSON.
+// Returns a process exit code.
+static int
+getHomeFlow(const char *configPath)
+{
+  HubConfig cfg = loadHubConfig(configPath);
+  if (!cfg.valid) {
+    fprintf(stderr,
+            "No hub address/token found in configuration file %s\n",
+            configPath);
+    return 1;
+  }
+
+  const std::string url = "https://" + cfg.host + ":" +
+                          std::to_string(cfg.port) + "/v1/home";
+
+  std::string response;
+  std::string err;
+  if (!hubRequest("GET", url, "", nullptr, cfg.token, response, err)) {
+    fprintf(stderr, "Failed to fetch home info: %s\n", err.c_str());
+    return 1;
+  }
+
+  try {
+    printf("%s\n", nlohmann::json::parse(response).dump(2).c_str());
+  }
+  catch (const std::exception &) {
+    // Not valid JSON - print as-is
+    printf("%s\n", response.c_str());
+  }
+
+  return 0;
+}
+
 // ----------------------------------------------------------------------------
 // main
 // ----------------------------------------------------------------------------
@@ -564,9 +607,12 @@ usage(const char *prog)
   fprintf(stderr,
           "Usage: %s <driver.so> <config.json> [guid]\n"
           "       %s --get-token <hub-ip> [port]\n"
+          "       %s --get-home <config.json>\n"
           "\n"
           "--get-token runs the one-time pairing flow against the hub and\n"
           "prints the access token to put in the configuration file.\n"
+          "--get-home prints the complete home state (devices, rooms,\n"
+          "scenes, users, hub info) as JSON and exits.\n"
           "\n"
           "Otherwise the vscpl2drv-ikea-dirigera driver is loaded; every\n"
           "event it generates is printed and the following commands are\n"
@@ -576,8 +622,10 @@ usage(const char *prog)
           "  off <subzone> [zone]        Turn device(s) off (255 = all)\n"
           "  dim <subzone> <0-100> [zone] Set dim level in percent\n"
           "  devices                     List the devices on the hub\n"
+          "  home                        Print the complete home state JSON\n"
           "  help                        Show this help\n"
           "  quit                        Close the driver and exit\n",
+          prog,
           prog,
           prog);
 }
@@ -587,6 +635,10 @@ main(int argc, char *argv[])
 {
   if ((argc >= 3) && (0 == strcmp(argv[1], "--get-token"))) {
     return getTokenFlow(argv[2], (argc > 3) ? atoi(argv[3]) : 8443);
+  }
+
+  if ((argc >= 3) && (0 == strcmp(argv[1], "--get-home"))) {
+    return getHomeFlow(argv[2]);
   }
 
   if (argc < 3) {
@@ -678,6 +730,11 @@ main(int argc, char *argv[])
 
     if ("devices" == cmd) {
       printHubDevices(loadHubConfig(configPath));
+      continue;
+    }
+
+    if ("home" == cmd) {
+      getHomeFlow(configPath);
       continue;
     }
 

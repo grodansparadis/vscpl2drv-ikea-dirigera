@@ -128,6 +128,19 @@ jobs:
         echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
         echo "CMAKE_TOOLCHAIN_FILE=$toolchainFile" >> $env:GITHUB_ENV
 
+    # NSIS for the Windows installer package
+    - name: Install NSIS (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        choco install nsis -y
+        foreach ($dir in @("${env:ProgramFiles}\NSIS", "${env:ProgramFiles(x86)}\NSIS")) {
+          if (Test-Path "$dir\makensis.exe") {
+            Write-Host "NSIS found at: $dir"
+            echo "$dir" >> $env:GITHUB_PATH
+          }
+        }
+
     - name: Create Build Environment
       shell: bash
       run: cmake -E make_directory ${{github.workspace}}/build
@@ -221,7 +234,9 @@ jobs:
       run: |
         cpack -G ZIP .
         if ($LASTEXITCODE -ne 0) { Write-Host "ZIP package creation failed" }
-        Get-ChildItem -Include "*.zip" -Recurse -ErrorAction SilentlyContinue |
+        cpack -G NSIS .
+        if ($LASTEXITCODE -ne 0) { Write-Host "NSIS package creation failed" }
+        Get-ChildItem -Include "*.zip", "*.exe" -Recurse -Depth 0 -ErrorAction SilentlyContinue |
           Format-Table Name, Length -AutoSize
 
     - name: Upload artifacts
@@ -232,6 +247,7 @@ jobs:
           ${{github.workspace}}/build/*.so
           ${{github.workspace}}/build/**/*.dylib
           ${{github.workspace}}/build/**/*.dll
+          ${{github.workspace}}/build/*.exe
           ${{github.workspace}}/build/*.deb
           ${{github.workspace}}/build/*.rpm
           ${{github.workspace}}/build/*.tar.gz

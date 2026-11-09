@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Refuse in-source builds - they pollute the source tree and a stray
+# CMakeCache.txt in the source directory breaks later out-of-source builds
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    message(FATAL_ERROR
+        "In-source builds are not allowed. Remove CMakeCache.txt and "
+        "CMakeFiles/ from the source directory, then build out of source:\n"
+        "  mkdir build && cd build && cmake .. && make")
+endif()
+
 # Parse the version from src/version.h (single source of truth, also parsed
 # by the CI workflows)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" VERSION_H_CONTENT)
@@ -150,7 +159,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "VSCP level II driver that interacts with Matter/Zigbee devices connected to an IKEA Dirigera hub")
 set(CPACK_PACKAGE_VENDOR "the VSCP Project")
 set(CPACK_PACKAGE_CONTACT "akhe@vscp.org")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
@@ -158,11 +167,17 @@ set(CPACK_PACKAGE_FILE_NAME
     "${CPACK_PACKAGE_NAME}_${PROJECT_VERSION}_${CMAKE_SYSTEM_PROCESSOR}")
 
 if(WIN32)
-    set(CPACK_GENERATOR "ZIP")
+    set(CPACK_GENERATOR "NSIS" "ZIP")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "VSCP\\\\${CPACK_PACKAGE_NAME}")
+    set(CPACK_NSIS_PACKAGE_NAME "vscpl2drv-ikea-dirigera")
+    set(CPACK_NSIS_DISPLAY_NAME "VSCP level II IKEA Dirigera driver")
     set(CPACK_NSIS_HELP_LINK
         "https://github.com/grodansparadis/vscpl2drv-ikea-dirigera")
     set(CPACK_NSIS_URL_INFO_ABOUT
         "https://github.com/grodansparadis/vscpl2drv-ikea-dirigera")
+    set(CPACK_NSIS_CONTACT "akhe@vscp.org")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH OFF)
 elseif(APPLE)
     set(CPACK_GENERATOR "TGZ" "ZIP")
     set(CPACK_SET_DESTDIR ON)

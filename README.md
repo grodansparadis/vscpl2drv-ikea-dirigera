@@ -63,6 +63,13 @@ It can also run the one-time hub pairing flow to obtain an access token
 ./build/testapp/testapp --get-token <hub-ip> [port]
 ```
 
+and dump the complete home state (devices, rooms, scenes, users, hub info)
+as JSON using the hub/token from a configuration file:
+
+```sh
+./build/testapp/testapp --get-home <config.json>
+```
+
 It prints every event the driver generates (with decoded measurement values)
 and accepts the following commands on stdin:
 
@@ -72,6 +79,7 @@ and accepts the following commands on stdin:
 | `off <subzone> [zone]` | Send CLASS1.CONTROL TurnOff |
 | `dim <subzone> <0-100> [zone]` | Send CLASS1.CONTROL Dim lamp(s) |
 | `devices` | List the devices on the hub (id, type, name, reachability, attributes) — useful for finding device ids for the config |
+| `home` | Print the complete home state (devices, rooms, scenes, users, hub info) as JSON |
 | `help` | Show help |
 | `quit` | Close the driver and exit |
 
