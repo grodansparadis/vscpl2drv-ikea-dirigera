@@ -120,12 +120,12 @@ CIkeaDirigera::readRegister(DirigeraDevice &dev, uint16_t page, uint8_t offset)
         return static_cast<uint8_t>(dev.pageSelect >> 8);
       case 0x93: // Page select LSB
         return static_cast<uint8_t>(dev.pageSelect & 0xff);
-      case 0x94: // Firmware major version
-        return VSCPL2DRV_IKEA_DIRIGERA_MAJOR_VERSION;
-      case 0x95: // Firmware minor version
+      case 0x94: // Firmware major version (two digit year of year.month.patch)
+        return VSCPL2DRV_IKEA_DIRIGERA_MAJOR_VERSION % 100;
+      case 0x95: // Firmware minor version (month)
         return VSCPL2DRV_IKEA_DIRIGERA_MINOR_VERSION;
-      case 0x96: // Firmware build version
-        return VSCPL2DRV_IKEA_DIRIGERA_PATCH_VERSION;
+      case 0x96: // Firmware build version (patch)
+        return VSCPL2DRV_IKEA_DIRIGERA_PATCH_VERSION % 256;
       case 0x97: // Boot loader algorithm (none)
         return 0xff;
       case 0x98: // Buffer size

@@ -111,9 +111,11 @@ VSCPRead(long handle, vscpEvent *event, unsigned long timeout)
 VSCP_DRIVER_EXPORT unsigned long
 VSCPGetVersion(void)
 {
-    return ((static_cast<unsigned long>(DRIVER_VERSION_MAJOR) << 16) |
+    // The version scheme is year.month.patch - the year is reported as
+    // two digits so each component fits its 8-bit field
+    return ((static_cast<unsigned long>(DRIVER_VERSION_MAJOR % 100) << 16) |
             (static_cast<unsigned long>(DRIVER_VERSION_MINOR) << 8) |
-            static_cast<unsigned long>(DRIVER_VERSION_PATCH))
+            static_cast<unsigned long>(DRIVER_VERSION_PATCH % 256))
            << 8;
 }
 

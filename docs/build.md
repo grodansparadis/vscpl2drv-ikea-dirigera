@@ -24,7 +24,11 @@ make
 
 The driver version is maintained in
 [src/version.h](https://github.com/grodansparadis/vscpl2drv-ikea-dirigera/blob/main/src/version.h) and
-parsed by CMake and the CI workflows.
+parsed by CMake and the CI workflows. The scheme is **year.month.patch** —
+the patch number is incremented automatically on every push by the
+`auto-version-patch` workflow (on a new month the version rolls over to
+`year.month.1`). `VSCPGetVersion()` and the firmware version registers
+report the year as two digits so each component fits its 8-bit field.
 
 ## Install
 
