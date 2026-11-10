@@ -157,3 +157,5 @@ Connect to `wss://<hub-ip>:8443/v1` with the same Bearer header. Messages are JS
 - [Leggin/dirigera (Python client)](https://github.com/Leggin/dirigera)
 - [dvdgeisler/DirigeraClient (Java client)](https://www.github.com/dvdgeisler/DirigeraClient)
 - [Matter Alpha: IKEA patched OTBR API on Dirigera](https://www.matteralpha.com/explainer/ikea-patched-openthread-border-router-api-on-dirigera-hub)
+
+[filename](./bottom-copyright.md ':include')

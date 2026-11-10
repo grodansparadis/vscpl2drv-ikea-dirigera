@@ -261,6 +261,30 @@ DirigeraClient::getDevices(json &devices, std::string &err)
 }
 
 bool
+DirigeraClient::getHome(json &home, std::string &err)
+{
+  std::string response;
+  if (!perform("GET", "/home", "", response, err)) {
+    return false;
+  }
+
+  try {
+    home = json::parse(response);
+  }
+  catch (const std::exception &e) {
+    err = std::string("Failed to parse home state: ") + e.what();
+    return false;
+  }
+
+  if (!home.is_object()) {
+    err = "Home state is not a JSON object";
+    return false;
+  }
+
+  return true;
+}
+
+bool
 DirigeraClient::setAttributes(const std::string &deviceId,
                               const json &attributes,
                               std::string &err)
@@ -368,7 +392,10 @@ CIkeaDirigera::loadConfig(const std::string &path)
   m_verifyTls = cfg.value("verify-tls", false);
   m_useWebsocket = cfg.value("use-websocket", false);
   m_pollInterval = cfg.value("poll-interval", 5u);
+  m_heartbeatInterval = cfg.value("heartbeat-interval", 30u);
   m_zone = static_cast<uint8_t>(cfg.value("zone", 0));
+  m_dbPath = cfg.value("database",
+                       "/var/lib/vscp/vscpl2drv-ikea-dirigera.sqlite3");
 
   if (m_pollInterval < 1) {
     m_pollInterval = 1;
@@ -434,15 +461,50 @@ CIkeaDirigera::open(const std::string &pathConfig, const char *pGuid)
 
   m_client.init(m_host, m_port, m_token, m_verifyTls);
 
-  // Validate hub connectivity before we declare the driver open
-  json devices;
+  // Open the driver database
+  if (!m_dbPath.empty()) {
+    std::string dberr;
+    if (m_db.open(m_dbPath, dberr)) {
+      m_log->info("Database {} opened", m_dbPath);
+    }
+    else {
+      m_log->error("Failed to open database {}: {} - continuing without "
+                   "persistent storage",
+                   m_dbPath,
+                   dberr);
+    }
+  }
+
+  // Fetch the complete home state (devices, rooms, scenes, users, hub info)
+  // and persist it. Fall back to the plain device list if /home fails.
+  json devices = json::array();
   std::string err;
-  if (!m_client.getDevices(devices, err)) {
-    m_log->error("Failed to connect to Dirigera hub {}:{} - {}",
-                 m_host,
-                 m_port,
-                 err);
-    return false;
+  json home;
+  if (m_client.getHome(home, err)) {
+    m_log->info("Fetched complete home state from hub {}:{}", m_host, m_port);
+    if (m_db.isOpen()) {
+      if (m_db.saveHome(home)) {
+        m_log->info("Home state saved to database");
+      }
+      else {
+        m_log->warn("Failed to save home state to database");
+      }
+    }
+    if (home.contains("devices") && home["devices"].is_array()) {
+      devices = home["devices"];
+    }
+  }
+  else {
+    m_log->warn("Failed to fetch home state ({}) - falling back to the "
+                "device list",
+                err);
+    if (!m_client.getDevices(devices, err)) {
+      m_log->error("Failed to connect to Dirigera hub {}:{} - {}",
+                   m_host,
+                   m_port,
+                   err);
+      return false;
+    }
   }
 
   m_log->info("Connected to Dirigera hub {}:{} - {} device(s) found",
@@ -591,9 +653,44 @@ CIkeaDirigera::registerDevice(const json &jdev)
               guidToString(dev.guid));
 
   m_devices[id] = dev;
+  DirigeraDevice &node = m_devices[id];
+
+  // Simulated node: restore the decision matrix and persist the VSCP
+  // mapping and the internally generated MDF
+  if (m_db.isOpen()) {
+    m_db.loadDm(node.id, node.dm, sizeof(node.dm));
+    m_db.saveDeviceMapping(node.id,
+                           node.name,
+                           node.deviceType,
+                           node.index,
+                           node.zone,
+                           node.subzone,
+                           node.sensorIndex,
+                           guidToString(node.guid));
+    m_db.saveMdf(node.deviceType, generateMdf(node));
+  }
 
   // Announce the initial state
-  compareAndEmit(m_devices[id], m_devices[id].attributes, true);
+  compareAndEmit(node, node.attributes, true);
+}
+
+// Send a node heartbeat for every simulated device that is active
+// (registered) and reachable through the hub
+void
+CIkeaDirigera::sendHeartbeats()
+{
+  std::lock_guard<std::mutex> lock(m_deviceMutex);
+
+  for (auto &item : m_devices) {
+    DirigeraDevice &dev = item.second;
+    if (!dev.reachable) {
+      continue;
+    }
+    queueEvent(VSCP_CLASS1_INFORMATION,
+               VSCP_TYPE_INFORMATION_NODE_HEARTBEAT,
+               dev,
+               { 0, dev.zone, dev.subzone });
+  }
 }
 
 void
@@ -602,11 +699,16 @@ CIkeaDirigera::workerLoop()
   using namespace std::chrono;
 
   auto nextPoll = steady_clock::now();
+  auto nextHeartbeat = steady_clock::now();
 
   while (m_run) {
     if (steady_clock::now() >= nextPoll) {
       pollDevices();
       nextPoll = steady_clock::now() + seconds(m_pollInterval);
+    }
+    if ((m_heartbeatInterval > 0) && (steady_clock::now() >= nextHeartbeat)) {
+      sendHeartbeats();
+      nextHeartbeat = steady_clock::now() + seconds(m_heartbeatInterval);
     }
     std::this_thread::sleep_for(milliseconds(100));
   }
@@ -807,6 +909,22 @@ CIkeaDirigera::handleWsMessage(const std::string &msg)
   }
 }
 
+// Periodic 1 s tick that keeps the websocket service loop turning so
+// heartbeats and shutdown are handled promptly even on an idle connection
+namespace {
+struct WsTick {
+  lws_sorted_usec_list_t sul;
+  struct lws_context *ctx;
+};
+
+void
+wsTickCallback(lws_sorted_usec_list_t *sul)
+{
+  WsTick *tick = lws_container_of(sul, WsTick, sul);
+  lws_sul_schedule(tick->ctx, 0, &tick->sul, wsTickCallback, LWS_US_PER_SEC);
+}
+} // namespace
+
 void
 CIkeaDirigera::websocketLoop()
 {
@@ -839,7 +957,12 @@ CIkeaDirigera::websocketLoop()
     m_wsContext = ctx;
   }
 
+  WsTick tick {};
+  tick.ctx = ctx;
+  lws_sul_schedule(ctx, 0, &tick.sul, wsTickCallback, LWS_US_PER_SEC);
+
   auto nextConnect = steady_clock::now();
+  auto nextHeartbeat = steady_clock::now();
   constexpr auto RECONNECT_DELAY = seconds(5);
 
   while (m_run) {
@@ -879,6 +1002,11 @@ CIkeaDirigera::websocketLoop()
     // up changes that happened while the event stream was down
     if (m_wsNeedResync.exchange(false)) {
       pollDevices();
+    }
+
+    if ((m_heartbeatInterval > 0) && (steady_clock::now() >= nextHeartbeat)) {
+      sendHeartbeats();
+      nextHeartbeat = steady_clock::now() + seconds(m_heartbeatInterval);
     }
   }
 
@@ -1095,6 +1223,14 @@ CIkeaDirigera::writeEvent(const vscpEvent *pEvent)
     pdata += 16;
     size -= 16;
   }
+
+  // Register access events for the simulated nodes
+  if (VSCP_CLASS1_PROTOCOL == vscpClass) {
+    return handleProtocolEvent(pEvent->vscp_type, pdata, size);
+  }
+
+  // Give the per-device decision matrices a chance to act on the event
+  checkDecisionMatrix(vscpClass, pEvent->vscp_type, pdata, size);
 
   if (VSCP_CLASS1_CONTROL == vscpClass) {
     return handleControl(pEvent->vscp_type, pdata, size, destGuid);

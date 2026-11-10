@@ -5,7 +5,9 @@
     "verify-tls": false,
     "use-websocket": false,
     "poll-interval": 5,
+    "heartbeat-interval": 30,
     "zone": 0,
+    "database": "/var/lib/vscp/vscpl2drv-ikea-dirigera.sqlite3",
     "logging": {
         "console-enable": true,
         "console-level": "info",

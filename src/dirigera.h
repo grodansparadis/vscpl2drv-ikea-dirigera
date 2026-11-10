@@ -31,6 +31,8 @@
 #ifndef VSCPL2DRV_IKEA_DIRIGERA_H
 #define VSCPL2DRV_IKEA_DIRIGERA_H
 
+#include "db.h"
+
 #include <vscp.h>
 
 #include <nlohmann/json.hpp>
@@ -68,6 +70,9 @@ public:
   // GET /v1/devices
   bool getDevices(nlohmann::json &devices, std::string &err);
 
+  // GET /v1/home - the complete home state
+  bool getHome(nlohmann::json &home, std::string &err);
+
   // PATCH /v1/devices/<id> with [{ "attributes": { ... } }]
   bool setAttributes(const std::string &deviceId,
                      const nlohmann::json &attributes,
@@ -101,21 +106,46 @@ struct DeviceMapping {
 };
 
 // ----------------------------------------------------------------------------
-// A device known to the hub
+// A device known to the hub. Each device is simulated as a VSCP node with
+// a register space (status/functionality), a decision matrix and an
+// internally generated MDF.
 // ----------------------------------------------------------------------------
+
+// Decision matrix geometry: rows of 8 bytes at page 1, offset 0
+// Row layout: oaddr, flags, class-mask, class-filter, type-mask,
+//             type-filter, action, action-parameter
+constexpr int DM_ROW_COUNT = 4;
+constexpr int DM_ROW_SIZE = 8;
+constexpr uint16_t DM_PAGE = 1;
+
+// Decision matrix flag bits
+constexpr uint8_t DM_FLAG_ENABLED = 0x80;
+constexpr uint8_t DM_FLAG_CHECK_ZONE = 0x10;
+constexpr uint8_t DM_FLAG_CHECK_SUBZONE = 0x08;
+
+// Decision matrix actions
+constexpr uint8_t DM_ACTION_NOOP = 0;
+constexpr uint8_t DM_ACTION_TURNON = 1;
+constexpr uint8_t DM_ACTION_TURNOFF = 2;
+constexpr uint8_t DM_ACTION_DIM = 3; // action parameter = level 0-100
 
 struct DirigeraDevice {
   std::string id;           // Dirigera device id
   std::string name;         // customName from the hub
   std::string deviceType;   // light/outlet/motionSensor/environmentSensor/...
   std::string configuredType; // type from the config mapping (if any)
-  uint8_t index = 0;        // event index (discovery order)
+  uint8_t index = 0;        // event index (discovery order) = node nickname
   uint8_t guid[16] = { 0 }; // GUID used in events for this device
   uint8_t zone = 0;         // VSCP zone for this device
   uint8_t subzone = 0;      // VSCP subzone for this device
   uint8_t sensorIndex = 0;  // sensor index from the id suffix (-n/_n)
   bool reachable = true;
   nlohmann::json attributes; // last seen attribute set
+
+  // --- simulated VSCP node state -------------------------------------------
+  uint16_t pageSelect = 0;                      // standard page select regs
+  uint8_t userId[5] = { 0 };                    // standard user id regs
+  uint8_t dm[DM_ROW_COUNT * DM_ROW_SIZE] = { 0 }; // decision matrix
 };
 
 // ----------------------------------------------------------------------------
@@ -155,6 +185,7 @@ private:
   void websocketLoop();
   void handleWsMessage(const std::string &msg);
   void pollDevices();
+  void sendHeartbeats();
   void registerDevice(const nlohmann::json &jdev);
   void compareAndEmit(DirigeraDevice &dev,
                       const nlohmann::json &newAttr,
@@ -179,6 +210,23 @@ private:
                     const uint8_t *destGuid);
   std::vector<DirigeraDevice *> matchDevices(uint8_t zone, uint8_t subzone);
 
+  // --- simulated VSCP node (registers / DM / MDF) ---------------------------
+  // Implemented in registers.cpp. m_deviceMutex must be held.
+  uint8_t readRegister(DirigeraDevice &dev, uint16_t page, uint8_t offset);
+  uint8_t writeRegister(DirigeraDevice &dev,
+                        uint16_t page,
+                        uint8_t offset,
+                        uint8_t value);
+  int handleProtocolEvent(uint16_t vscpType,
+                          const uint8_t *pdata,
+                          uint16_t size);
+  void checkDecisionMatrix(uint16_t vscpClass,
+                           uint16_t vscpType,
+                           const uint8_t *pdata,
+                           uint16_t size);
+  void executeDmAction(DirigeraDevice &dev, uint8_t action, uint8_t param);
+  std::string generateMdf(const DirigeraDevice &dev);
+
   // --- configuration -------------------------------------------------------
   std::string m_host;
   uint16_t m_port = 8443;
@@ -187,12 +235,15 @@ private:
   bool m_useWebsocket = false;   // subscribe to the hub event stream instead
                                  // of polling
   unsigned m_pollInterval = 5;   // seconds (poll mode)
+  unsigned m_heartbeatInterval = 30; // seconds, 0 = no heartbeats
   uint8_t m_zone = 0;
+  std::string m_dbPath;          // sqlite database path ("" = disabled)
   std::vector<DeviceMapping> m_mappings; // configured device mappings
 
   // --- state ---------------------------------------------------------------
   uint8_t m_guid[16] = { 0 };
   DirigeraClient m_client;
+  DirigeraDb m_db;
   std::shared_ptr<spdlog::logger> m_log;
 
   std::mutex m_deviceMutex;

@@ -133,3 +133,5 @@ Add `-i` to a call to see the HTTP status.
 | 401 | Bad or revoked token. |
 | 400 | The body is not an array, or the device does not support that attribute. |
 | 404 | Wrong device, room or scene ID. |
+
+[filename](./bottom-copyright.md ':include')

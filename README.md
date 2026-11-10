@@ -122,7 +122,9 @@ daemon (the path set for the driver in the daemon configuration). See
     "verify-tls": false,
     "use-websocket": false,
     "poll-interval": 5,
+    "heartbeat-interval": 30,
     "zone": 0,
+    "database": "/var/lib/vscp/vscpl2drv-ikea-dirigera.sqlite3",
     "logging": {
         "console-enable": true,
         "console-level": "info",
@@ -156,7 +158,9 @@ daemon (the path set for the driver in the daemon configuration). See
 | `verify-tls` | Verify the hub TLS certificate. The hub uses a self-signed certificate so the default is `false`. |
 | `use-websocket` | Subscribe to the hub websocket event stream (`wss://<hub>:8443/v1`) for status updates instead of polling. The driver reconnects automatically and re-syncs the device registry over REST after every (re)connect. Default `false` (poll). |
 | `poll-interval` | Device state poll interval in seconds (poll mode). Default `5`. |
+| `heartbeat-interval` | Seconds between node heartbeats sent for every active, reachable device (`0` = off). Default `30`. |
 | `zone` | Default VSCP zone used in generated events and matched in control events. Default `0`. |
+| `database` | SQLite database where the complete home state is stored on startup and where decision matrices and the internal MDFs are persisted. Set to `""` to disable. Default `/var/lib/vscp/vscpl2drv-ikea-dirigera.sqlite3`. |
 | `logging` | Console and rotating-file log settings (spdlog levels: `trace`, `debug`, `info`, `warn`, `err`, `off`). |
 | `devices` | Optional list of device mappings, see below. |
 
@@ -199,7 +203,66 @@ VSCP events. Measurements use single precision floating point data coding.
 | `lightLevel` | CLASS1.MEASUREMENT Relative level (50), unit 0 (0.0–1.0) |
 
 The full initial state of every device is reported when the driver starts and
-when a new device appears on the hub.
+when a new device appears on the hub. In addition a node heartbeat
+(CLASS1.INFORMATION type 9) is sent every `heartbeat-interval` seconds for
+every device that is active and reachable through the hub.
+
+Detailed documentation is found in [docs/](./docs/README.md) — docsify
+formatted, published at
+<https://grodansparadis.github.io/vscpl2drv-ikea-dirigera> when GitHub Pages
+is enabled for the `docs/` folder: installation, build instructions,
+configuration reference, event mapping, simulated nodes/registers, database
+schema and the test application.
+
+## Home database
+
+On startup the driver fetches the complete home state from the hub
+(`GET /v1/home` - devices, rooms, scenes, users, device sets and hub info)
+and stores it in the SQLite database given by the `database` configuration
+key. The raw JSON document is kept in the `home` table and structured data in
+the `hub`, `devices`, `rooms`, `scenes`, `users` and `device_sets` tables.
+The `devices` table also carries the VSCP addressing assigned to each device
+(index, zone, subzone, sensor index and GUID).
+
+## Simulated VSCP nodes
+
+Every hub device is simulated as a VSCP level I node, addressed by its
+nickname (= device index). Status and functionality are exposed through
+registers, accessible with CLASS1.PROTOCOL register events (`Read register`
+(9) / `Write register` (11) / `Extended page read` (37) / `Extended page
+write` (38), responses as types 10/39) - also when wrapped as Class2 Level I
+(class 512).
+
+**Page 0 - status/control registers**
+
+| Register | Access | Content |
+| -------- | ------ | ------- |
+| 0x00 | rw | `isOn` (0/1) - writing switches the device |
+| 0x01 | rw | `lightLevel` 0-100 - writing dims the device (0 turns off) |
+| 0x02 | r | `isDetected` (motion sensors) |
+| 0x03 | r | `isOpen` (open/close sensors) |
+| 0x04-0x05 | r | temperature in centidegrees Celsius (int16, MSB first) |
+| 0x06 | r | relative humidity % |
+| 0x07-0x08 | r | PM2.5 µg/m³ (uint16, MSB first) |
+| 0x09-0x0A | r | illuminance lux (uint16, MSB first) |
+| 0x0B | r | battery % |
+| 0x10-0x13 | r | zone, subzone, sensor index, reachable |
+
+**Page 1 - decision matrix** (4 rows × 8 bytes at offset 0)
+
+Row layout: `oaddr, flags, class-mask, class-filter, type-mask, type-filter,
+action, action-parameter`. Flags: `0x80` enable, `0x10` check zone, `0x08`
+check subzone. Actions: `1` turn on, `2` turn off, `3` dim to parameter
+(0-100). Incoming events are matched against every device's decision matrix
+and matching rows control the device through the hub. The matrix is persisted
+in the driver database and restored on startup.
+
+**Standard registers** (0x80-0xFF on every page) are simulated as well:
+alarm, VSCP version, user id, nickname, page select, firmware version
+(driver version), GUID (0xD0-0xDF) etc. The MDF is internal: an MDF document
+describing the registers and decision matrix is generated per device type
+and stored in the `mdf` table of the driver database (the MDF URL registers
+read as zero).
 
 ## Controlling devices
 

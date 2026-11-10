@@ -90,14 +90,14 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libwebsockets-dev libssl-dev
+        sudo apt-get install -y libcurl4-openssl-dev libwebsockets-dev libssl-dev libsqlite3-dev
 
     # macOS dependencies
     - name: Install macOS dependencies
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install curl libwebsockets openssl@3 pkg-config
+        brew install curl libwebsockets openssl@3 sqlite pkg-config
         echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
         echo "CMAKE_PREFIX_PATH=$(brew --prefix curl):$(brew --prefix libwebsockets):$(brew --prefix openssl@3):$(brew --prefix)" >> $GITHUB_ENV
 
@@ -122,7 +122,7 @@ jobs:
         git clone https://github.com/Microsoft/vcpkg.git
         cd vcpkg
         .\bootstrap-vcpkg.bat
-        .\vcpkg.exe install curl:x64-windows libwebsockets:x64-windows openssl:x64-windows
+        .\vcpkg.exe install curl:x64-windows libwebsockets:x64-windows openssl:x64-windows sqlite3:x64-windows
         $vcpkgRoot = "${{ github.workspace }}\vcpkg"
         $toolchainFile = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
         echo "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
@@ -291,7 +291,7 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends \
               build-essential cmake git ca-certificates pkg-config \
-              libcurl4-openssl-dev libwebsockets-dev libssl-dev \
+              libcurl4-openssl-dev libwebsockets-dev libssl-dev libsqlite3-dev \
               file dpkg-dev
             cmake -S . -B build-rpi \
               -DCMAKE_BUILD_TYPE=Release \

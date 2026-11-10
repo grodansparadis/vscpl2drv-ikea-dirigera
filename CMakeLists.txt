@@ -81,6 +81,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 find_package(CURL REQUIRED)
+find_package(SQLite3 REQUIRED)
 find_package(libwebsockets CONFIG REQUIRED)
 # Prefer the shared libwebsockets target; some package managers (e.g. vcpkg
 # static triplets) only provide the plain 'websockets' target
@@ -95,11 +96,14 @@ find_package(Threads REQUIRED)
 add_library(vscpl2drv-ikea-dirigera SHARED
     src/vscpl2drv-ikea-dirigera.cpp
     src/dirigera.cpp
+    src/registers.cpp
+    src/db.cpp
 )
 
 target_include_directories(vscpl2drv-ikea-dirigera PRIVATE "${VSCP_INCLUDE_DIR}")
 target_link_libraries(vscpl2drv-ikea-dirigera PRIVATE
     CURL::libcurl
+    SQLite::SQLite3
     ${LWS_LIBRARIES}
     Threads::Threads
     spdlog::spdlog_header_only
