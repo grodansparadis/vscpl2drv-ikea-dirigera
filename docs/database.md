@@ -21,6 +21,7 @@ and keeps running without persistent storage.
 | `device_sets` | Device set id, name and raw JSON. |
 | `mdf` | Internally generated MDF document (XML) per device type. See [simulated-nodes.md](./simulated-nodes.md). |
 | `dm` | Decision matrix blob (32 bytes) per device id. Written whenever a DM register is written and restored when the device registers on startup. |
+| `node_state` | Writable simulated-node registers per device id: `page_select` and the 5-byte `user_id` blob. Written whenever one of these registers is written and restored when the device registers on startup. |
 
 ## Examples
 

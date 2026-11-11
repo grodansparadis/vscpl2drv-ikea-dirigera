@@ -8,8 +8,9 @@ Device attribute changes are picked up from the hub — polled every
 state of every device is reported when the driver starts and when a new
 device appears on the hub.
 
-Every event is sent with the device GUID (mapped GUID, or interface GUID
-with the device index as LSB) and normal priority.
+Every event is sent with the device GUID (mapped GUID, or the hub-MAC
+based Ethernet GUID `FF:FF:FF:FF:FF:FF:FF:FE:<mac>:ii:ss` with the device
+index in byte 14 and the sensor index in byte 15) and normal priority.
 
 ### On/off style attributes
 

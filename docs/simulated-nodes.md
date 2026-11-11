@@ -97,15 +97,21 @@ type 38, data: 02 00 01 04  FF 03 03 32    ; type mask FF, filter 3, action 3 (d
 | 0x80 | r | alarm status (always 0) |
 | 0x81/0x82 | r | VSCP specification version major/minor |
 | 0x83 | r | error counter (always 0) |
-| 0x84-0x88 | rw | user id |
+| 0x84-0x88 | rw | user id — **persisted in the driver database** |
 | 0x91 | r | nickname (= device index) |
-| 0x92/0x93 | rw | page select MSB/LSB |
+| 0x92/0x93 | rw | page select MSB/LSB — **persisted in the driver database** |
 | 0x94-0x96 | r | firmware version (driver version) |
 | 0x97 | r | boot loader algorithm (0xFF = none) |
 | 0x98 | r | buffer size (8) |
 | 0x99 | r | number of register pages (2) |
 | 0xD0-0xDF | r | device GUID, MSB first |
 | 0xE0-0xFF | r | MDF URL — reads 0, the MDF is internal (see below) |
+
+All writable registers keep their values between driver runs: the decision
+matrix and the standard user id / page select registers are persisted in
+the driver database and restored when the device registers on startup,
+while the page 0 control registers (`isOn`, `lightLevel`) write through to
+the hub which holds their state.
 
 ## Internal MDF
 

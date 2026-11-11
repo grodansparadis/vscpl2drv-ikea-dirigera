@@ -224,15 +224,24 @@ CIkeaDirigera::writeRegister(DirigeraDevice &dev,
   if (offset >= 0x80) {
     if ((offset >= 0x84) && (offset <= 0x88)) {
       dev.userId[offset - 0x84] = value;
+      if (m_db.isOpen()) {
+        m_db.saveNodeState(dev.id, dev.pageSelect, dev.userId);
+      }
       return value;
     }
     if (0x92 == offset) {
       dev.pageSelect =
         static_cast<uint16_t>((value << 8) | (dev.pageSelect & 0xff));
+      if (m_db.isOpen()) {
+        m_db.saveNodeState(dev.id, dev.pageSelect, dev.userId);
+      }
       return value;
     }
     if (0x93 == offset) {
       dev.pageSelect = static_cast<uint16_t>((dev.pageSelect & 0xff00) | value);
+      if (m_db.isOpen()) {
+        m_db.saveNodeState(dev.id, dev.pageSelect, dev.userId);
+      }
       return value;
     }
     // Everything else is read only

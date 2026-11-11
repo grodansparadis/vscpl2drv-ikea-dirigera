@@ -53,6 +53,15 @@ public:
   bool saveDm(const std::string &deviceId, const uint8_t *dm, size_t len);
   bool loadDm(const std::string &deviceId, uint8_t *dm, size_t len);
 
+  // Writable simulated-node registers (user id, page select) - persisted
+  // per device so written values survive driver restarts
+  bool saveNodeState(const std::string &deviceId,
+                     uint16_t pageSelect,
+                     const uint8_t userId[5]);
+  bool loadNodeState(const std::string &deviceId,
+                     uint16_t &pageSelect,
+                     uint8_t userId[5]);
+
 private:
   bool exec(const char *sql);
 

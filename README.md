@@ -143,6 +143,10 @@ daemon (the path set for the driver in the daemon configuration). See
             "type": "light"
         },
         {
+            "name": "Hall motion sensor",
+            "index": 10
+        },
+        {
             "id": "dirigera-device-id",
             "subzone": 3
         }
@@ -172,14 +176,18 @@ Each entry in the `devices` list maps a hub device to VSCP addressing:
 | --- | ----------- |
 | `name` | Device name (`customName`) on the hub to match. The comparison is case insensitive (UTF-8, ASCII + Latin-1). |
 | `id` | Unique device id to match. Used for devices whose names are not mapped. `name` matches take precedence. |
-| `guid` | GUID (string form) used for events from the device. A Class2 Level I CONTROL event carrying this GUID as destination addresses the device directly. |
+| `guid` | Full GUID (string form) used for events from the device. A Class2 Level I CONTROL event carrying this GUID as destination addresses the device directly. |
+| `index` | Node index/nickname (0-255) for the device. Also placed in byte 14 of the default GUID. Auto-assigned indices skip indices pinned here. |
 | `zone` | VSCP zone for the device. Defaults to the global `zone`. |
 | `subzone` | VSCP subzone for the device. Defaults to the device index. |
 | `type` | Expected device type. The driver warns if the hub reports a different type for the matched device. |
 
-Each discovered device is assigned an index (in discovery order). Devices
-without a mapped `guid` use the interface GUID with the index as LSB; the
-index is also the default subzone.
+Each discovered device is assigned an index (mapped `index` if set,
+otherwise the next free index in discovery order). Devices without a mapped
+`guid` use the standard VSCP Ethernet GUID built from the hub MAC address
+(`FF:FF:FF:FF:FF:FF:FF:FE:<mac>:ii:ss`) with the index in byte 14 and the
+sensor index in byte 15 — falling back to the interface GUID if the hub MAC
+cannot be resolved. The index is also the default subzone.
 
 If the unique device id ends in a short `-<n>`/`_<n>` suffix (as hub device
 ids do, e.g. `...-6e1be6a3bc1f_1`), that number is used as the sensor index

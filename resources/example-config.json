@@ -26,6 +26,10 @@
             "type": "light"
         },
         {
+            "name": "Hall motion sensor",
+            "index": 10
+        },
+        {
             "id": "dirigera-device-id",
             "subzone": 3
         }

@@ -16,6 +16,9 @@
 
 #include <cstring>
 #include <ctime>
+#include <filesystem>
+
+#include <unistd.h>
 
 using json = nlohmann::json;
 
@@ -57,11 +60,28 @@ DirigeraDb::open(const std::string &path, std::string &err)
     m_db = nullptr;
   }
 
+  // sqlite3_open creates a missing database file but not missing parent
+  // directories - create them here so a first run works out of the box
+  std::error_code ec;
+  const std::filesystem::path dir = std::filesystem::path(path).parent_path();
+  if (!dir.empty() && !std::filesystem::exists(dir, ec)) {
+    if (!std::filesystem::create_directories(dir, ec) && ec) {
+      err = "unable to create database directory " + dir.string() + ": " +
+            ec.message();
+      return false;
+    }
+  }
+
   if (SQLITE_OK != sqlite3_open(path.c_str(), &m_db)) {
     err = (nullptr != m_db) ? sqlite3_errmsg(m_db) : "out of memory";
     if (nullptr != m_db) {
       sqlite3_close(m_db);
       m_db = nullptr;
+    }
+    // Give a more helpful message when the directory is not writable
+    if (!dir.empty() && !std::filesystem::exists(path, ec) &&
+        0 != access(dir.c_str(), W_OK)) {
+      err += " (no write permission in " + dir.string() + ")";
     }
     return false;
   }
@@ -109,7 +129,11 @@ DirigeraDb::open(const std::string &path, std::string &err)
     "  xml TEXT);"
     "CREATE TABLE IF NOT EXISTS dm ("
     "  device_id TEXT PRIMARY KEY,"
-    "  matrix BLOB);";
+    "  matrix BLOB);"
+    "CREATE TABLE IF NOT EXISTS node_state ("
+    "  device_id TEXT PRIMARY KEY,"
+    "  page_select INTEGER,"
+    "  user_id BLOB);";
 
   if (!exec(schema)) {
     err = sqlite3_errmsg(m_db);
@@ -429,6 +453,75 @@ DirigeraDb::loadDm(const std::string &deviceId, uint8_t *dm, size_t len)
     const int blobLen = sqlite3_column_bytes(stmt, 0);
     if ((nullptr != blob) && (blobLen == static_cast<int>(len))) {
       memcpy(dm, blob, len);
+      ok = true;
+    }
+  }
+  sqlite3_finalize(stmt);
+
+  return ok;
+}
+
+bool
+DirigeraDb::saveNodeState(const std::string &deviceId,
+                          uint16_t pageSelect,
+                          const uint8_t userId[5])
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  if ((nullptr == m_db) || (nullptr == userId)) {
+    return false;
+  }
+
+  sqlite3_stmt *stmt = nullptr;
+  if (SQLITE_OK !=
+      sqlite3_prepare_v2(m_db,
+                         "INSERT OR REPLACE INTO node_state "
+                         "(device_id, page_select, user_id) "
+                         "VALUES (?1, ?2, ?3)",
+                         -1,
+                         &stmt,
+                         nullptr)) {
+    return false;
+  }
+  sqlite3_bind_text(stmt, 1, deviceId.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(stmt, 2, pageSelect);
+  sqlite3_bind_blob(stmt, 3, userId, 5, SQLITE_TRANSIENT);
+  bool ok = (SQLITE_DONE == sqlite3_step(stmt));
+  sqlite3_finalize(stmt);
+
+  return ok;
+}
+
+bool
+DirigeraDb::loadNodeState(const std::string &deviceId,
+                          uint16_t &pageSelect,
+                          uint8_t userId[5])
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  if ((nullptr == m_db) || (nullptr == userId)) {
+    return false;
+  }
+
+  sqlite3_stmt *stmt = nullptr;
+  if (SQLITE_OK !=
+      sqlite3_prepare_v2(m_db,
+                         "SELECT page_select, user_id FROM node_state "
+                         "WHERE device_id = ?1",
+                         -1,
+                         &stmt,
+                         nullptr)) {
+    return false;
+  }
+  sqlite3_bind_text(stmt, 1, deviceId.c_str(), -1, SQLITE_TRANSIENT);
+
+  bool ok = false;
+  if (SQLITE_ROW == sqlite3_step(stmt)) {
+    pageSelect = static_cast<uint16_t>(sqlite3_column_int(stmt, 0));
+    const void *blob = sqlite3_column_blob(stmt, 1);
+    const int blobLen = sqlite3_column_bytes(stmt, 1);
+    if ((nullptr != blob) && (5 == blobLen)) {
+      memcpy(userId, blob, 5);
       ok = true;
     }
   }

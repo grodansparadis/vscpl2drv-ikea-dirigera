@@ -101,6 +101,7 @@ struct DeviceMapping {
   std::string type;         // expected device type (validated against hub)
   bool hasGuid = false;
   uint8_t guid[16] = { 0 }; // GUID to use for events from/to the device
+  int index = -1;           // node index/nickname (-1 = discovery order)
   int zone = -1;            // -1 = use the global zone
   int subzone = -1;         // -1 = use the device index
 };
@@ -241,14 +242,18 @@ private:
   std::vector<DeviceMapping> m_mappings; // configured device mappings
 
   // --- state ---------------------------------------------------------------
-  uint8_t m_guid[16] = { 0 };
+  uint8_t m_guid[16] = { 0 };     // interface GUID (from the daemon)
+  uint8_t m_hubGuid[16] = { 0 };  // Ethernet GUID built from the hub MAC
+  bool m_hasHubGuid = false;      // m_hubGuid is valid
   DirigeraClient m_client;
   DirigeraDb m_db;
   std::shared_ptr<spdlog::logger> m_log;
 
   std::mutex m_deviceMutex;
   std::map<std::string, DirigeraDevice> m_devices; // keyed on device id
-  uint8_t m_nextIndex = 0;
+  int m_nextIndex = 0;                   // next auto-assigned device index
+  bool m_indexUsed[256] = { false };     // taken by registered devices
+  bool m_indexReserved[256] = { false }; // pinned by config mappings
 
   // Outgoing (driver -> daemon) event queue
   std::mutex m_queueMutex;

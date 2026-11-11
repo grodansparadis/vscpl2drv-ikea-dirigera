@@ -22,8 +22,13 @@
 #include <curl/curl.h>
 #include <libwebsockets.h>
 
+#include <arpa/inet.h>
+#include <netdb.h>
+
 #include <chrono>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 
@@ -80,6 +85,83 @@ guidToString(const uint8_t *guid)
   return buf;
 }
 
+// Resolve a host name (or dotted quad) to an IPv4 address string
+static bool
+resolveIpv4(const std::string &host, std::string &ip)
+{
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+
+  struct addrinfo *res = nullptr;
+  if ((0 != getaddrinfo(host.c_str(), nullptr, &hints, &res)) ||
+      (nullptr == res)) {
+    return false;
+  }
+
+  char buf[INET_ADDRSTRLEN];
+  const struct sockaddr_in *sin =
+    reinterpret_cast<const struct sockaddr_in *>(res->ai_addr);
+  const char *p = inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf));
+  freeaddrinfo(res);
+
+  if (nullptr == p) {
+    return false;
+  }
+
+  ip = buf;
+  return true;
+}
+
+// Look up the MAC address for an IPv4 address in the kernel neighbour
+// table (/proc/net/arp). The hub has just been talked to over TCP so an
+// entry exists when the hub is on the local subnet.
+static bool
+lookupArpMac(const std::string &ip, uint8_t mac[6])
+{
+  std::ifstream in("/proc/net/arp");
+  if (!in.is_open()) {
+    return false;
+  }
+
+  std::string line;
+  std::getline(in, line); // skip the header line
+
+  while (std::getline(in, line)) {
+    char addr[64] = { 0 };
+    char hwtype[16] = { 0 };
+    char flags[16] = { 0 };
+    char hwaddr[64] = { 0 };
+    if (sscanf(line.c_str(), "%63s %15s %15s %63s", addr, hwtype, flags,
+               hwaddr) < 4) {
+      continue;
+    }
+    if (ip != addr) {
+      continue;
+    }
+    if (0 == strtol(flags, nullptr, 16)) {
+      continue; // incomplete entry
+    }
+
+    unsigned m[6];
+    if (6 != sscanf(hwaddr, "%x:%x:%x:%x:%x:%x", &m[0], &m[1], &m[2], &m[3],
+                    &m[4], &m[5])) {
+      continue;
+    }
+    if (0 == (m[0] | m[1] | m[2] | m[3] | m[4] | m[5])) {
+      continue; // all zero hardware address
+    }
+
+    for (int i = 0; i < 6; i++) {
+      mac[i] = static_cast<uint8_t>(m[i]);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 // Uppercase a UTF-8 string for case insensitive comparison. Handles ASCII
 // and the Latin-1 supplement (å, ä, ö, é, ü, ...). Other code points are
 // left unchanged.
@@ -117,6 +199,14 @@ utf8ToUpper(const std::string &s)
   }
 
   return out;
+}
+
+// Device names are ALWAYS compared case insensitively (UTF-8,
+// ASCII + Latin-1). Use this helper for every device name comparison.
+static bool
+nameEqual(const std::string &a, const std::string &b)
+{
+  return utf8ToUpper(a) == utf8ToUpper(b);
 }
 
 // Sensor index from a trailing "-<n>" or "_<n>" on the unique device id.
@@ -423,12 +513,33 @@ CIkeaDirigera::loadConfig(const std::string &path)
       map.name = jdev.value("name", "");
       map.id = jdev.value("id", "");
       map.type = jdev.value("type", "");
+      map.index = jdev.value("index", -1);
       map.zone = jdev.value("zone", -1);
       map.subzone = jdev.value("subzone", -1);
 
       if (map.name.empty() && map.id.empty()) {
         m_log->warn("Device mapping without 'name' or 'id' ignored");
         continue;
+      }
+
+      if (map.index > 255) {
+        m_log->warn("Index {} in device mapping for '{}' out of range "
+                    "(0-255) - ignored",
+                    map.index,
+                    map.name.empty() ? map.id : map.name);
+        map.index = -1;
+      }
+      if (map.index >= 0) {
+        if (m_indexReserved[map.index]) {
+          m_log->warn("Index {} in device mapping for '{}' is already "
+                      "mapped to another device - ignored",
+                      map.index,
+                      map.name.empty() ? map.id : map.name);
+          map.index = -1;
+        }
+        else {
+          m_indexReserved[map.index] = true;
+        }
       }
 
       if (jdev.contains("guid") && jdev["guid"].is_string()) {
@@ -512,6 +623,35 @@ CIkeaDirigera::open(const std::string &pathConfig, const char *pGuid)
               m_port,
               devices.size());
 
+  // Build the device GUID base from the hub MAC address on the standard
+  // VSCP Ethernet form FF:FF:FF:FF:FF:FF:FF:FE:<mac>:nn:nn. The hub has
+  // just been talked to over TCP so its neighbour table entry is fresh.
+  {
+    std::string hubIp;
+    uint8_t mac[6];
+    if (resolveIpv4(m_host, hubIp) && lookupArpMac(hubIp, mac)) {
+      memset(m_hubGuid, 0xFF, 8);
+      m_hubGuid[7] = 0xFE;
+      memcpy(m_hubGuid + 8, mac, 6);
+      m_hubGuid[14] = 0;
+      m_hubGuid[15] = 0;
+      m_hasHubGuid = true;
+      m_log->info("Hub MAC {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} - "
+                  "device GUID base {}",
+                  mac[0],
+                  mac[1],
+                  mac[2],
+                  mac[3],
+                  mac[4],
+                  mac[5],
+                  guidToString(m_hubGuid));
+    }
+    else {
+      m_log->warn("Unable to resolve the hub MAC address - using the "
+                  "interface GUID as device GUID base");
+    }
+  }
+
   {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
     for (const auto &jdev : devices) {
@@ -585,7 +725,6 @@ CIkeaDirigera::registerDevice(const json &jdev)
   dev.id = id;
   dev.deviceType = jdev.value("deviceType", jdev.value("type", "unknown"));
   dev.reachable = jdev.value("isReachable", true);
-  dev.index = m_nextIndex++;
   dev.sensorIndex = sensorIndexFromId(id);
 
   if (jdev.contains("attributes") && jdev["attributes"].is_object()) {
@@ -593,19 +732,11 @@ CIkeaDirigera::registerDevice(const json &jdev)
     dev.name = dev.attributes.value("customName", "");
   }
 
-  // Defaults for unmapped devices: interface GUID with the device index as
-  // LSB, global zone and the index as subzone
-  memcpy(dev.guid, m_guid, 16);
-  dev.guid[15] = dev.index;
-  dev.zone = m_zone;
-  dev.subzone = dev.index;
-
-  // Find a configured mapping - by name first (case insensitive, UTF-8),
-  // then by unique id
+  // Find a configured mapping - by name first (always case insensitive,
+  // UTF-8), then by unique id
   const DeviceMapping *map = nullptr;
-  const std::string nameUpper = utf8ToUpper(dev.name);
   for (const auto &m : m_mappings) {
-    if (!m.name.empty() && (utf8ToUpper(m.name) == nameUpper)) {
+    if (!m.name.empty() && nameEqual(m.name, dev.name)) {
       map = &m;
       break;
     }
@@ -618,6 +749,48 @@ CIkeaDirigera::registerDevice(const json &jdev)
       }
     }
   }
+
+  // Node index (nickname): a mapping may pin it; otherwise the next free
+  // index in discovery order is used, skipping indices pinned by mappings
+  int idx = -1;
+  if ((nullptr != map) && (map->index >= 0)) {
+    if (m_indexUsed[map->index]) {
+      m_log->warn("Mapped index {} for device '{}' ({}) already in use - "
+                  "assigning the next free index",
+                  map->index,
+                  dev.name,
+                  dev.id);
+    }
+    else {
+      idx = map->index;
+    }
+  }
+  if (idx < 0) {
+    while ((m_nextIndex < 256) &&
+           (m_indexUsed[m_nextIndex] || m_indexReserved[m_nextIndex])) {
+      m_nextIndex++;
+    }
+    if (m_nextIndex > 255) {
+      m_log->error("No free device index for '{}' ({}) - device ignored",
+                   dev.name,
+                   dev.id);
+      return;
+    }
+    idx = m_nextIndex++;
+  }
+  m_indexUsed[idx] = true;
+  dev.index = static_cast<uint8_t>(idx);
+
+  // Defaults for unmapped devices: the Ethernet GUID built from the hub
+  // MAC address (FF:FF:FF:FF:FF:FF:FF:FE:<mac>:ii:ss) with the device
+  // index in byte 14 and the sensor index in byte 15 - the interface GUID
+  // is used as base if the hub MAC is unknown. Zone is the global zone and
+  // subzone the index.
+  memcpy(dev.guid, m_hasHubGuid ? m_hubGuid : m_guid, 16);
+  dev.guid[14] = dev.index;
+  dev.guid[15] = dev.sensorIndex;
+  dev.zone = m_zone;
+  dev.subzone = dev.index;
 
   if (nullptr != map) {
     if (map->hasGuid) {
@@ -655,10 +828,12 @@ CIkeaDirigera::registerDevice(const json &jdev)
   m_devices[id] = dev;
   DirigeraDevice &node = m_devices[id];
 
-  // Simulated node: restore the decision matrix and persist the VSCP
-  // mapping and the internally generated MDF
+  // Simulated node: restore the decision matrix and the writable node
+  // registers (user id, page select), and persist the VSCP mapping and
+  // the internally generated MDF
   if (m_db.isOpen()) {
     m_db.loadDm(node.id, node.dm, sizeof(node.dm));
+    m_db.loadNodeState(node.id, node.pageSelect, node.userId);
     m_db.saveDeviceMapping(node.id,
                            node.name,
                            node.deviceType,

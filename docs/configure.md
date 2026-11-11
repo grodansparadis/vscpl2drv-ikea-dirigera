@@ -33,6 +33,10 @@ The VSCP daemon hands the driver the path to a JSON configuration file in
             "type": "light"
         },
         {
+            "name": "Hall motion sensor",
+            "index": 10
+        },
+        {
             "id": "dirigera-device-id",
             "subzone": 3
         }
@@ -82,15 +86,26 @@ correctly), **then by unique device id**.
 | --- | ---- | ----------- |
 | `name` | string | Device name on the hub to match. |
 | `id` | string | Unique device id to match (used when the name is not mapped). Find ids with the test application's `devices` command. |
-| `guid` | string | GUID (`FF:FF:...` string form) used for events **from** the device. A Class2 Level I CONTROL event carrying this GUID as destination addresses the device **to** directly. |
+| `guid` | string | Full GUID (`FF:FF:...` string form) used for events **from** the device. A Class2 Level I CONTROL event carrying this GUID as destination addresses the device **to** directly. |
+| `index` | number | Node index/nickname (0-255) for the device. Also placed in byte 14 of the default GUID. Auto-assigned indices skip indices pinned here. |
 | `zone` | number | VSCP zone for the device. Defaults to the global `zone`. |
 | `subzone` | number | VSCP subzone for the device. Defaults to the device index. |
 | `type` | string | Expected hub device type (`light`, `outlet`, `motionSensor`, `environmentSensor`, `lightSensor`, `openCloseSensor`, ...). The driver warns if the hub reports a different type. |
 
+A mapping can pin the device addressing in two ways: set a full `guid` to
+use exactly that GUID for the device, and/or set `index` to pin the node
+index/nickname (which is also used in byte 14 of the default hub-MAC GUID
+and as the default subzone). If a pinned index is already taken the driver
+logs a warning and assigns the next free index instead.
+
 Unmapped devices get defaults:
 
 * **index** — assigned in discovery order, also the node nickname
-* **GUID** — the interface GUID with the index as LSB
+* **GUID** — the standard VSCP Ethernet GUID built from the hub MAC address
+  (`FF:FF:FF:FF:FF:FF:FF:FE:<mac>:ii:ss`) with the device index in byte 14
+  and the sensor index in byte 15. The hub MAC is resolved from the
+  neighbour (ARP) table after connecting; if it cannot be resolved the
+  interface GUID is used as base instead.
 * **zone** — the global `zone`
 * **subzone** — the device index
 
