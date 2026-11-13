@@ -237,6 +237,23 @@ jobs:
         Get-ChildItem -Include "*.zip", "*.exe" -Recurse -Depth 0 -ErrorAction SilentlyContinue |
           Format-Table Name, Length -AutoSize
 
+    - name: Write SHA256SUMS
+      id: sha256sums_241
+      continue-on-error: true
+      shell: bash
+      run: |
+        bash .github/scripts/write-sha256sums.sh "SHA256SUMS-vscpl2drv-ikea-dirigera-${{ needs.version.outputs.version_short }}-${{ matrix.os }}-${{ matrix.triplet }}" <<'SHA256SUMS_PATTERNS'
+        ${{github.workspace}}/build/*.so
+        ${{github.workspace}}/build/**/*.dylib
+        ${{github.workspace}}/build/**/*.dll
+        ${{github.workspace}}/build/*.exe
+        ${{github.workspace}}/build/*.deb
+        ${{github.workspace}}/build/*.rpm
+        ${{github.workspace}}/build/*.tar.gz
+        ${{github.workspace}}/build/*.tgz
+        ${{github.workspace}}/build/*.zip
+        SHA256SUMS_PATTERNS
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -251,6 +268,7 @@ jobs:
           ${{github.workspace}}/build/*.tar.gz
           ${{github.workspace}}/build/*.tgz
           ${{github.workspace}}/build/*.zip
+          ${{ steps.sha256sums_241.outputs.file }}
         retention-days: 30
         if-no-files-found: error
 
@@ -301,6 +319,17 @@ jobs:
             ls -la *.deb *.tar.gz 2>/dev/null || echo "No packages generated"
           '
 
+    - name: Write SHA256SUMS
+      id: sha256sums_305
+      continue-on-error: true
+      shell: bash
+      run: |
+        bash .github/scripts/write-sha256sums.sh "SHA256SUMS-vscpl2drv-ikea-dirigera-${{ needs.version.outputs.version_short }}-${{ matrix.name }}" <<'SHA256SUMS_PATTERNS'
+        ${{ github.workspace }}/build-rpi/*.so
+        ${{ github.workspace }}/build-rpi/*.deb
+        ${{ github.workspace }}/build-rpi/*.tar.gz
+        SHA256SUMS_PATTERNS
+
     - name: Upload Raspberry Pi artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -309,6 +338,7 @@ jobs:
           ${{ github.workspace }}/build-rpi/*.so
           ${{ github.workspace }}/build-rpi/*.deb
           ${{ github.workspace }}/build-rpi/*.tar.gz
+          ${{ steps.sha256sums_305.outputs.file }}
         retention-days: 30
         if-no-files-found: error
 
