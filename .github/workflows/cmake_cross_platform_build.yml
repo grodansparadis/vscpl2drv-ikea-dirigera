@@ -89,7 +89,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libwebsockets-dev libssl-dev libsqlite3-dev
+        sudo apt-get install -y libcurl4-openssl-dev libwebsockets-dev libssl-dev libsqlite3-dev pandoc
 
     # macOS dependencies
     - name: Install macOS dependencies
@@ -308,7 +308,7 @@ jobs:
             apt-get install -y --no-install-recommends \
               build-essential cmake git ca-certificates pkg-config \
               libcurl4-openssl-dev libwebsockets-dev libssl-dev libsqlite3-dev \
-              file dpkg-dev
+              file dpkg-dev pandoc
             cmake -S . -B build-rpi \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX=/usr

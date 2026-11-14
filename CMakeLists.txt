@@ -196,3 +196,8 @@ else()
 endif()
 
 include(CPack)
+
+# Man page (man/vscpl2drv-ikea-dirigera.1.md, converted with pandoc)
+if(UNIX)
+  add_subdirectory(man)
+endif()
