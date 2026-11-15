@@ -18,7 +18,11 @@
 #include <ctime>
 #include <filesystem>
 
+#ifdef _WIN32
+#include <io.h> // _access
+#else
 #include <unistd.h>
+#endif
 
 using json = nlohmann::json;
 
@@ -80,7 +84,11 @@ DirigeraDb::open(const std::string &path, std::string &err)
     }
     // Give a more helpful message when the directory is not writable
     if (!dir.empty() && !std::filesystem::exists(path, ec) &&
+#ifdef _WIN32
+        0 != _access(dir.string().c_str(), 2)) { // 2 = write permission
+#else
         0 != access(dir.c_str(), W_OK)) {
+#endif
       err += " (no write permission in " + dir.string() + ")";
     }
     return false;

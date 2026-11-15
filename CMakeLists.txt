@@ -116,6 +116,8 @@ target_compile_definitions(vscpl2drv-ikea-dirigera PRIVATE
 )
 
 if(WIN32)
+    # getaddrinfo/inet_ntop
+    target_link_libraries(vscpl2drv-ikea-dirigera PRIVATE ws2_32)
     set_target_properties(vscpl2drv-ikea-dirigera PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         PREFIX ""

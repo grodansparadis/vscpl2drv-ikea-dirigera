@@ -22,8 +22,13 @@
 #include <curl/curl.h>
 #include <libwebsockets.h>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h> // getaddrinfo, inet_ntop
+#else
 #include <arpa/inet.h>
 #include <netdb.h>
+#endif
 
 #include <chrono>
 #include <cctype>
